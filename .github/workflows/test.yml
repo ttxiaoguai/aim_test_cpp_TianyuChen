@@ -7,66 +7,37 @@ on:
     branches: [main]
 
 jobs:
-  check-commit-count:
-    runs-on: ubuntu-latest
-    outputs:
-      should-skip: ${{ steps.check.outputs.should-skip }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Check if first commit
-        id: check
-        run: |
-          COMMIT_COUNT=$(git rev-list --count HEAD)
-          if [ "$COMMIT_COUNT" -eq 1 ]; then
-              echo "should-skip=true" >> $GITHUB_OUTPUT
-          else
-              echo "should-skip=false" >> $GITHUB_OUTPUT
-          fi
-
-  skip-first-commit:
-    runs-on: ubuntu-latest
-    needs: check-commit-count
-    if: needs.check-commit-count.outputs.should-skip == 'true'
-    steps:
-      - name: Skip message
-        run: |
-          echo "# Tests" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "## Tests Skipped" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "⏭️ Skipped for first commit after repository creation from template" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Status: ⏭️ Skipped (First commit)" >> "$GITHUB_STEP_SUMMARY"
-
   test:
     runs-on: ubuntu-latest
-    needs: check-commit-count
-    if: needs.check-commit-count.outputs.should-skip == 'false'
+    # Skip for upstream repository
+    if: github.repository != 'unnc-aim/aim-cpp-2526-coursework'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Check if should skip
+        id: should_skip
+        run: |
+          # Check if this is the first commit
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          if [ "$COMMIT_COUNT" -eq 1 ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "# Tests Skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "⏭️ Skipped for first commit after repository creation from template" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Detect changed files and enforce Song.cpp and CMakeLists.txt only
         id: file_check
+        if: steps.should_skip.outputs.skip == 'false'
         shell: bash
         run: |
           set -eo pipefail
-
-          # Skip changed files check for the upstream repository
-          if [ "${GITHUB_REPOSITORY}" = "unnc-aim/aim-cpp-2526-coursework" ]; then
-            echo "# Tests" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "## Files changed" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "⏭️ Skipped for upstream repository (${GITHUB_REPOSITORY})" >> "$GITHUB_STEP_SUMMARY"
-            echo "- Status: ⏭️ Skipped" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
 
           # Determine current branch name (fallback if GITHUB_REF_NAME not set)
           CURRENT_BRANCH="${GITHUB_REF_NAME:-${GITHUB_REF#refs/heads/}}"
@@ -90,6 +61,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -z "${CHANGED_FILES}" ]; then
             echo "No changed files detected; nothing to check." >> "$GITHUB_STEP_SUMMARY"
+            echo "file_check=pass" >> $GITHUB_OUTPUT
             exit 0
           else
             echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -117,9 +89,13 @@ jobs:
             printf '%s\n' "${DISALLOWED_LIST[@]}" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
             echo "❌ Disallowed modification(s) detected." >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Final Score: 0 / 100**" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Assignment failed due to unauthorized file modifications." >> "$GITHUB_STEP_SUMMARY"
             echo "file_check=fail" >> $GITHUB_OUTPUT
             printf 'Disallowed modification(s) detected: %s\n' "${DISALLOWED_LIST[*]}" >&2
-            # Don't exit here, continue to grading
+            exit 1
           else 
             echo "- Status: ✅ Passed" >> "$GITHUB_STEP_SUMMARY"
             echo "file_check=pass" >> $GITHUB_OUTPUT
@@ -127,11 +103,8 @@ jobs:
 
       - name: Check Git Commit Messages
         id: git_check
+        if: steps.should_skip.outputs.skip == 'false' && steps.file_check.outputs.file_check == 'pass'
         run: |
-          # Skip completely for the upstream repository - no grading report
-          if [ "${GITHUB_REPOSITORY}" = "unnc-aim/aim-cpp-2526-coursework" ]; then
-            exit 0
-          fi
 
           echo "检查所有提交信息格式..."
           echo ""
@@ -194,21 +167,16 @@ jobs:
             echo "EOF" >> $GITHUB_OUTPUT
           fi
       - name: Set up Python
+        if: steps.should_skip.outputs.skip == 'false' && steps.file_check.outputs.file_check == 'pass'
         uses: actions/setup-python@v4
         with:
           python-version: "3.x"
 
       - name: Check Code Format
         id: format_check
+        if: steps.should_skip.outputs.skip == 'false' && steps.file_check.outputs.file_check == 'pass'
         continue-on-error: true
         run: |
-          # Skip format check for the upstream repository
-          if [ "${GITHUB_REPOSITORY}" = "unnc-aim/aim-cpp-2526-coursework" ]; then
-            echo "format_deduction=0" >> $GITHUB_OUTPUT
-            echo "format_status=skipped" >> $GITHUB_OUTPUT
-            echo "Code format check skipped for upstream repository"
-            exit 0
-          fi
 
           echo "Checking code format..."
           python3 check_format.py Song.cpp > format_result.txt 2>&1
@@ -230,14 +198,8 @@ jobs:
 
       - name: Build Project
         id: build
+        if: steps.should_skip.outputs.skip == 'false' && steps.file_check.outputs.file_check == 'pass'
         run: |
-          # Skip build for the upstream repository
-          if [ "${GITHUB_REPOSITORY}" = "unnc-aim/aim-cpp-2526-coursework" ]; then
-            echo "build_status=skipped" >> $GITHUB_OUTPUT
-            echo "Build skipped for upstream repository"
-            exit 0
-          fi
-
           echo "Building project..."
           mkdir -p build
           cd build
@@ -249,24 +211,22 @@ jobs:
             echo "Build successful"
           else
             echo "build_status=fail" >> $GITHUB_OUTPUT
-            echo "Build failed - assignment will receive 0 points"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "## Build Failed" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "❌ **CRITICAL FAILURE: Build failed**" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Final Score: 0 / 100**" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Assignment failed due to compilation errors." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
 
       - name: Run Tests
         id: test
+        if: steps.should_skip.outputs.skip == 'false' && steps.file_check.outputs.file_check == 'pass' && steps.build.outputs.build_status == 'pass'
         continue-on-error: true
         run: |
-          # Skip tests for the upstream repository
-          if [ "${GITHUB_REPOSITORY}" = "unnc-aim/aim-cpp-2526-coursework" ]; then
-            echo "total_tests=0" >> $GITHUB_OUTPUT
-            echo "passed_tests=0" >> $GITHUB_OUTPUT
-            echo "failed_tests=0" >> $GITHUB_OUTPUT
-            echo "test_deduction=0" >> $GITHUB_OUTPUT
-            echo "test_status=skipped" >> $GITHUB_OUTPUT
-            echo "Tests skipped for upstream repository"
-            exit 0
-          fi
 
           echo "Running tests..."
           cd build
@@ -299,37 +259,15 @@ jobs:
             echo "test_status=fail" >> $GITHUB_OUTPUT
           fi
 
-      - name: Run tests
-        if: always()
+      - name: Generate Grading Report
+        if: steps.should_skip.outputs.skip == 'false' && steps.file_check.outputs.file_check == 'pass' && steps.build.outputs.build_status == 'pass'
         shell: bash
         run: |
           set -eo pipefail
 
-          # Skip completely for the upstream repository - no grading report
-          if [ "${GITHUB_REPOSITORY}" = "unnc-aim/2026-cpp-cw1" ]; then
-            exit 0
-          fi
-
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "## Grading Report" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          # Check for critical failures that should result in 0 points
-          FILE_CHECK_STATUS="${{ steps.file_check.outputs.file_check }}"
-          BUILD_STATUS="${{ steps.build.outputs.build_status }}"
-
-          if [ "$FILE_CHECK_STATUS" = "fail" ]; then
-            echo "==========================================" >> "$GITHUB_STEP_SUMMARY"
-            echo "  MiniDJ Assignment Grading Report" >> "$GITHUB_STEP_SUMMARY"
-            echo "==========================================" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "❌ **CRITICAL FAILURE: Disallowed file modifications detected**" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "**Final Score: 0 / 100**" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Assignment failed due to unauthorized file modifications." >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
 
           # Get results from previous steps
           GIT_DEDUCTION="${{ steps.git_check.outputs.git_deduction }}"
