@@ -28,6 +28,7 @@ jobs:
             echo "# Tests Skipped" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "⏭️ Skipped for first commit after repository creation from template" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
@@ -105,7 +106,6 @@ jobs:
         id: git_check
         if: steps.should_skip.outputs.skip == 'false' && steps.file_check.outputs.file_check == 'pass'
         run: |
-
           echo "检查所有提交信息格式..."
           echo ""
 
@@ -166,6 +166,7 @@ jobs:
             echo -e "$VIOLATION_DETAILS" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           fi
+
       - name: Set up Python
         if: steps.should_skip.outputs.skip == 'false' && steps.file_check.outputs.file_check == 'pass'
         uses: actions/setup-python@v4
@@ -177,7 +178,6 @@ jobs:
         if: steps.should_skip.outputs.skip == 'false' && steps.file_check.outputs.file_check == 'pass'
         continue-on-error: true
         run: |
-
           echo "Checking code format..."
           python3 check_format.py Song.cpp > format_result.txt 2>&1
           FORMAT_EXIT_CODE=$?
@@ -227,19 +227,27 @@ jobs:
         if: steps.should_skip.outputs.skip == 'false' && steps.file_check.outputs.file_check == 'pass' && steps.build.outputs.build_status == 'pass'
         continue-on-error: true
         run: |
-
           echo "Running tests..."
           cd build
 
           ctest --output-on-failure --no-compress-output -T Test || true
 
-          TOTAL_TESTS=8
-          PASSED_TESTS=$(ctest -N | grep "Total Tests:" | grep -oE '[0-9]+' || echo "0")
+          # Get total number of tests from ctest output
+          TOTAL_TESTS=$(ctest -N 2>/dev/null | grep "Total Tests:" | grep -oE '[0-9]+' | head -1 || echo "8")
+          if [ -z "$TOTAL_TESTS" ] || [ "$TOTAL_TESTS" -eq 0 ]; then
+            TOTAL_TESTS=8
+          fi
 
+          # Count failed tests from log file
           FAILED_TESTS=$(grep -c "Test #.*\*\*\*Failed" Testing/Temporary/LastTest.log 2>/dev/null || echo "0")
+          if [ -z "$FAILED_TESTS" ]; then
+            FAILED_TESTS=0
+          fi
 
-          if [ "$FAILED_TESTS" -eq "0" ]; then
-            FAILED_TESTS=$((TOTAL_TESTS - PASSED_TESTS))
+          # Calculate passed tests
+          PASSED_TESTS=$((TOTAL_TESTS - FAILED_TESTS))
+          if [ $PASSED_TESTS -lt 0 ]; then
+            PASSED_TESTS=0
           fi
 
           TEST_DEDUCTION=$((FAILED_TESTS * 10))
