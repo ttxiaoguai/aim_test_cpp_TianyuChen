@@ -1,3 +1,4 @@
+
 # CMakeLists.txt
 
 # 1. 设置最低版本要求
@@ -24,4 +25,5 @@ enable_testing()
 add_test(NAME AllTests COMMAND ${PROJECT_NAME} --test-mode)
 # 或者如果项目要求每个测试分开运行，但通常只需注册主程序
 # add_test(NAME Test1 COMMAND ${PROJECT_NAME} Test1) 
+
 
